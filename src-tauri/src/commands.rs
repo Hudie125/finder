@@ -200,6 +200,17 @@ impl CommandRunner {
                             .args(["-NoProfile", "-Command", &format!("[System.Windows.Forms.MessageBox]::Show('{}', 'Finder Timer')", msg)])
                             .spawn();
                     }
+                    #[cfg(target_os = "linux")]
+                    {
+                        let msg = format!("Timer Finished: {}", dur_owned);
+                        let _ = std::process::Command::new("notify-send")
+                            .args(["Finder Timer", &msg])
+                            .spawn();
+                    }
+                    #[cfg(not(any(target_os = "windows", target_os = "linux")))]
+                    {
+                        let _ = dur_owned;
+                    }
                 });
 
                 Ok(format!("Timer set for {}", duration_str))
