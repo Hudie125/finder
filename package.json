@@ -1,0 +1,15 @@
+{
+  "name": "finder",
+  "version": "2.0.0",
+  "description": "Monochrome Liquid Glass Spotlight Launcher for Windows and Arch Linux",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.2.0"
+  }
+}

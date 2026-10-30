@@ -1,0 +1,23 @@
+# Rust & Cargo
+/src-tauri/target/
+**/*.rs.bk
+Cargo.lock
+
+# Node & Frontend
+node_modules/
+dist/
+npm-debug.log*
+
+# User Data & Storage Cache
+search_settings.json
+search_notes.json
+search_history.json
+search_binds.json
+usage_stats.json
+.finder/
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+*.tmp
