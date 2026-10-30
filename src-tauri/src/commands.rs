@@ -189,12 +189,13 @@ impl CommandRunner {
             "timer" => {
                 let duration_str = parts.get(1).copied().unwrap_or("5m");
                 let secs = Self::parse_duration_seconds(duration_str);
+                let dur_owned = duration_str.to_string();
                 
                 tokio::spawn(async move {
                     tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
                     #[cfg(target_os = "windows")]
                     {
-                        let msg = format!("Timer Finished: {}", duration_str);
+                        let msg = format!("Timer Finished: {}", dur_owned);
                         let _ = std::process::Command::new("powershell")
                             .args(["-NoProfile", "-Command", &format!("[System.Windows.Forms.MessageBox]::Show('{}', 'Finder Timer')", msg)])
                             .spawn();

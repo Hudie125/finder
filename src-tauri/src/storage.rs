@@ -12,19 +12,15 @@ pub struct StorageManager;
 
 impl StorageManager {
     fn get_storage_dir() -> PathBuf {
-        let dir = #[cfg(target_os = "windows")]
-        {
-            std::env::var("APPDATA")
-                .map(|p| PathBuf::from(p).join("Finder"))
-                .unwrap_or_else(|_| PathBuf::from(".finder"))
-        };
+        #[cfg(target_os = "windows")]
+        let dir = std::env::var("APPDATA")
+            .map(|p| PathBuf::from(p).join("Finder"))
+            .unwrap_or_else(|_| PathBuf::from(".finder"));
 
         #[cfg(not(target_os = "windows"))]
-        {
-            std::env::var("HOME")
-                .map(|p| PathBuf::from(p).join(".config").join("finder"))
-                .unwrap_or_else(|_| PathBuf::from(".finder"))
-        };
+        let dir = std::env::var("HOME")
+            .map(|p| PathBuf::from(p).join(".config").join("finder"))
+            .unwrap_or_else(|_| PathBuf::from(".finder"));
 
         if !dir.exists() {
             let _ = fs::create_dir_all(&dir);

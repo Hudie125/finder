@@ -296,7 +296,6 @@ fn main() {
     tauri::Builder::default()
         .manage(Arc::clone(&app_state))
         .plugin(tauri_plugin_shell::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             search,
             launch_app,
