@@ -49,7 +49,9 @@ impl CommandRunner {
             "lock" => {
                 #[cfg(target_os = "windows")]
                 {
-                    use windows::Win32::UI::WindowsAndMessaging::LockWorkStation;
+                    extern "system" {
+                        fn LockWorkStation() -> i32;
+                    }
                     unsafe { let _ = LockWorkStation(); }
                 }
                 #[cfg(target_os = "linux")]
@@ -188,7 +190,6 @@ impl CommandRunner {
                 let duration_str = parts.get(1).copied().unwrap_or("5m");
                 let secs = Self::parse_duration_seconds(duration_str);
                 
-                // Spawn background timer thread
                 tokio::spawn(async move {
                     tokio::time::sleep(tokio::time::Duration::from_secs(secs)).await;
                     #[cfg(target_os = "windows")]

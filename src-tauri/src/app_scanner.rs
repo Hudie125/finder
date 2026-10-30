@@ -103,7 +103,6 @@ impl AppScanner {
                     let ext_lower = ext.to_lowercase();
                     if ext_lower == "lnk" || ext_lower == "exe" || ext_lower == "url" {
                         if let Some(file_stem) = path.file_stem().and_then(|s| s.to_str()) {
-                            // Filter uninstaller shortcuts
                             let stem_lower = file_stem.to_lowercase();
                             if stem_lower.contains("uninstall") || stem_lower.contains("remove") || stem_lower.starts_with("help") {
                                 continue;
@@ -128,11 +127,14 @@ impl AppScanner {
     #[cfg(target_os = "linux")]
     fn scan_linux_desktop_files() -> Vec<AppEntry> {
         let mut apps = Vec::new();
-        let paths = vec![
+        let mut paths = vec![
             PathBuf::from("/usr/share/applications"),
             PathBuf::from("/usr/local/share/applications"),
-            dirs::home_dir().map(|h| h.join(".local/share/applications")).unwrap_or_default(),
         ];
+
+        if let Ok(home) = std::env::var("HOME") {
+            paths.push(PathBuf::from(home).join(".local/share/applications"));
+        }
 
         for base_path in paths {
             if !base_path.exists() {
@@ -153,7 +155,6 @@ impl AppScanner {
                             if line.starts_with("Name=") && name.is_none() {
                                 name = Some(line["Name=".len()..].trim().to_string());
                             } else if line.starts_with("Exec=") && exec.is_none() {
-                                // Strip desktop file arguments like %u, %F
                                 let raw_exec = line["Exec=".len()..].trim();
                                 let clean_exec = raw_exec.split_whitespace().next().unwrap_or(raw_exec).to_string();
                                 exec = Some(clean_exec);

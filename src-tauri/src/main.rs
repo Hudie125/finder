@@ -315,35 +315,42 @@ fn main() {
             let app_handle = app.handle().clone();
 
             // Setup Tray Menu
-            let toggle_item = MenuItem::with_id(&app_handle, "toggle", "Toggle Finder", true, None::<&str>)?;
-            let settings_item = MenuItem::with_id(&app_handle, "settings", "Preferences...", true, None::<&str>)?;
-            let quit_item = MenuItem::with_id(&app_handle, "quit", "Quit Finder", true, None::<&str>)?;
+            if let Ok(toggle_item) = MenuItem::with_id(&app_handle, "toggle", "Toggle Finder", true, None::<&str>) {
+                if let Ok(settings_item) = MenuItem::with_id(&app_handle, "settings", "Preferences...", true, None::<&str>) {
+                    if let Ok(quit_item) = MenuItem::with_id(&app_handle, "quit", "Quit Finder", true, None::<&str>) {
+                        if let Ok(tray_menu) = Menu::with_items(&app_handle, &[&toggle_item, &settings_item, &quit_item]) {
+                            let state_clone = Arc::clone(&state_for_tray);
+                            let app_handle_tray = app_handle.clone();
 
-            let tray_menu = Menu::with_items(&app_handle, &[&toggle_item, &settings_item, &quit_item])?;
+                            let mut tray_builder = TrayIconBuilder::new()
+                                .menu(&tray_menu)
+                                .show_menu_on_left_click(false)
+                                .on_menu_event(move |_app, event| match event.id.as_ref() {
+                                    "toggle" => {
+                                        toggle_window_visibility(&app_handle_tray, &state_clone.is_visible);
+                                    }
+                                    "settings" => {
+                                        if let Some(win) = app_handle_tray.get_webview_window("main") {
+                                            let _ = win.show();
+                                            let _ = win.set_focus();
+                                            let _ = win.emit("open-settings", ());
+                                        }
+                                    }
+                                    "quit" => {
+                                        std::process::exit(0);
+                                    }
+                                    _ => {}
+                                });
 
-            let state_clone = Arc::clone(&state_for_tray);
-            let app_handle_tray = app_handle.clone();
+                            if let Some(icon) = app.default_window_icon() {
+                                tray_builder = tray_builder.icon(icon.clone());
+                            }
 
-            let _ = TrayIconBuilder::new()
-                .menu(&tray_menu)
-                .show_menu_on_left_click(false)
-                .on_menu_event(move |_app, event| match event.id.as_ref() {
-                    "toggle" => {
-                        toggle_window_visibility(&app_handle_tray, &state_clone.is_visible);
-                    }
-                    "settings" => {
-                        if let Some(win) = app_handle_tray.get_webview_window("main") {
-                            let _ = win.show();
-                            let _ = win.set_focus();
-                            let _ = win.emit("open-settings", ());
+                            let _ = tray_builder.build(app);
                         }
                     }
-                    "quit" => {
-                        std::process::exit(0);
-                    }
-                    _ => {}
-                })
-                .build(app)?;
+                }
+            }
 
             Ok(())
         })
