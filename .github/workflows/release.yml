@@ -7,19 +7,22 @@ on:
   workflow_dispatch:
 
 jobs:
-  release:
-    permissions:
-      contents: write
+  build:
+    name: Build ${{ matrix.platform }}
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: 'windows-latest'
-            args: ''
-          - platform: 'ubuntu-22.04'
-            args: ''
+          - os: windows-latest
+            platform: windows
+            artifact_name: finder-windows-x64.exe
+            target_bin: src-tauri/target/release/finder.exe
+          - os: ubuntu-22.04
+            platform: linux
+            artifact_name: finder-linux-x64
+            target_bin: src-tauri/target/release/finder
 
-    runs-on: ${{ matrix.platform }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -32,32 +35,72 @@ jobs:
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Linux Dependencies (Ubuntu / Arch cross)
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Install Linux Build Dependencies
+        if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf libssl-dev
 
-      - name: Install frontend dependencies
-        run: npm install
+      - name: Build Release Binary
+        run: cargo build --release --manifest-path src-tauri/Cargo.toml
 
-      - name: Build Tauri Application
-        uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
         with:
-          tagName: v__VERSION__
-          releaseName: 'Finder v__VERSION__'
-          releaseBody: |
-            ## Finder v__VERSION__ Release 🚀
-            
-            ### ✨ What's New:
-            * **Monochrome UI + Liquid Glass**: Apple macOS / VisionOS inspired frosted glass aesthetics with fluid spring animations.
-            * **Whisper Voice Search & Commands**: Instant voice transcription and hands-free app launching and system commands.
-            * **Free Cloud AI Assistant**: Direct streaming answers, code generation, and reasoning.
-            * **Universal App Launcher & Window Switcher**: Lightning-fast indexing of installed applications and active GUI windows.
-            * **Live Hardware Telemetry & Weather**: Real-time CPU, RAM, GPU monitor and local weather forecasts.
-            * **Cross-Platform Adaptations**: Native support and automated installers for Windows 10/11 and Arch Linux.
-          releaseDraft: false
+          name: ${{ matrix.artifact_name }}
+          path: ${{ matrix.target_bin }}
+
+  publish-release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Package Release Assets
+        run: |
+          mkdir -p dist
+          if [ -f "release-artifacts/finder-windows-x64.exe/finder.exe" ]; then
+            cp "release-artifacts/finder-windows-x64.exe/finder.exe" "dist/Finder-Setup-Windows-x64.exe"
+          fi
+          if [ -f "release-artifacts/finder-linux-x64/finder" ]; then
+            cp "release-artifacts/finder-linux-x64/finder" "dist/finder-linux-x64"
+            chmod +x "dist/finder-linux-x64"
+            tar -czvf "dist/finder-linux-x64.tar.gz" -C dist finder-linux-x64
+          fi
+          ls -la dist
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          name: Finder ${{ github.ref_name }}
+          draft: false
           prerelease: false
-          args: ${{ matrix.args }}
+          files: |
+            dist/*
+            install.ps1
+            install.sh
+            PKGBUILD
+          body: |
+            ## Finder ${{ github.ref_name }} — Monochrome Liquid Glass Spotlight 🚀
+
+            ### ✨ Key Features:
+            * **Monochrome UI + Liquid Glass**: Apple macOS & VisionOS inspired frosted glass, subtle specular borders, and fluid spring animations.
+            * **Whisper Voice Recognition & Commands**: Voice search, launch applications by voice, lock PC, check weather, or start timers.
+            * **Free Cloud AI Assistant**: Streaming markdown answers with syntax-highlighted code blocks (no API keys required!).
+            * **Universal App Indexer & Window Switcher**: Lightning-fast indexing of installed apps and open GUI windows on Windows & Linux.
+            * **Scientific Calculator & Currency Converter**: Instant evaluation and currency conversion.
+            * **System Telemetry**: Live CPU load, RAM usage, and GPU monitor.
+
+            ### 📦 Download & Install:
+            * **Windows 10 / 11**: Download `Finder-Setup-Windows-x64.exe` or run `install.ps1`.
+            * **Arch Linux**: Download `finder-linux-x64.tar.gz`, run `./install.sh`, or install via `PKGBUILD`.
