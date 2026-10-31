@@ -273,7 +273,6 @@ pub fn toggle_window_visibility(app: &AppHandle, is_visible: &AtomicBool) {
             is_visible.store(false, Ordering::SeqCst);
         } else {
             let _ = win.show();
-            let _ = win.unminimize();
             let _ = win.set_focus();
             is_visible.store(true, Ordering::SeqCst);
             let _ = win.emit("focus-search", ());
@@ -390,10 +389,17 @@ fn main() {
 
     let state_for_tray = Arc::clone(&app_state);
     let state_for_setup = Arc::clone(&app_state);
+    let state_for_blur = Arc::clone(&app_state);
 
     tauri::Builder::default()
         .manage(Arc::clone(&app_state))
         .plugin(tauri_plugin_shell::init())
+        .on_window_event(move |window, event| {
+            if let tauri::WindowEvent::Focused(false) = event {
+                let _ = window.hide();
+                state_for_blur.is_visible.store(false, Ordering::SeqCst);
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             search,
             launch_app,
@@ -413,20 +419,6 @@ fn main() {
 
             #[cfg(target_os = "windows")]
             global_hotkey::start(app_handle.clone(), Arc::clone(&state_for_setup.is_visible));
-
-            // Hide window when it loses focus (clicking outside)
-            if let Some(win) = app.get_webview_window("main") {
-                let win_clone = win.clone();
-                let is_vis_blur = Arc::clone(&state_for_setup.is_visible);
-                win.on_window_event(move |event| {
-                    if let tauri::WindowEvent::Focused(focused) = event {
-                        if !focused {
-                            let _ = win_clone.hide();
-                            is_vis_blur.store(false, Ordering::SeqCst);
-                        }
-                    }
-                });
-            }
 
             // Setup Tray Menu
             if let Ok(toggle_item) = MenuItem::with_id(&app_handle, "toggle", "Toggle Finder", true, None::<&str>) {
