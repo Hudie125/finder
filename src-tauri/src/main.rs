@@ -288,6 +288,49 @@ pub fn should_ignore_blur() -> bool {
 }
 
 #[cfg(target_os = "windows")]
+pub fn position_window_bottom_center() {
+    unsafe {
+        extern "system" {
+            fn FindWindowW(lpClassName: *const u16, lpWindowName: *const u16) -> isize;
+            fn SystemParametersInfoW(uiAction: u32, uiParam: u32, pvParam: *mut RECT, fWinIni: u32) -> i32;
+            fn SetWindowPos(hwnd: isize, hWndInsertAfter: isize, X: i32, Y: i32, cx: i32, cy: i32, uFlags: u32) -> i32;
+        }
+
+        #[repr(C)]
+        struct RECT {
+            left: i32,
+            top: i32,
+            right: i32,
+            bottom: i32,
+        }
+
+        let title: Vec<u16> = "Finder\0".encode_utf16().collect();
+        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        if hwnd == 0 {
+            return;
+        }
+
+        let mut work_area = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SPI_GETWORKAREA = 0x0030
+        if SystemParametersInfoW(0x0030, 0, &mut work_area, 0) != 0 {
+            let work_w = work_area.right - work_area.left;
+            let win_w = 800;
+            let win_h = 560;
+
+            let x = work_area.left + (work_w - win_w) / 2;
+            // Position near bottom edge (36px above taskbar)
+            let y = work_area.bottom - win_h - 36;
+
+            const HWND_TOPMOST: isize = -1;
+            const SWP_NOSIZE: u32 = 0x0001;
+            const SWP_NOACTIVATE: u32 = 0x0010;
+
+            SetWindowPos(hwnd, HWND_TOPMOST, x, y, win_w, win_h, SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
 pub fn force_foreground() {
     unsafe {
         extern "system" {
@@ -338,13 +381,40 @@ pub fn force_foreground() {
 pub fn toggle_window_visibility(app: &AppHandle, is_visible: &AtomicBool) {
     if let Some(win) = app.get_webview_window("main") {
         let is_currently_visible = win.is_visible().unwrap_or(false);
-        let is_focused = win.is_focused().unwrap_or(false);
 
-        if is_currently_visible && is_focused {
+        let is_active_foreground = {
+            #[cfg(target_os = "windows")]
+            unsafe {
+                extern "system" {
+                    fn GetForegroundWindow() -> isize;
+                    fn GetWindowThreadProcessId(hwnd: isize, lpdwProcessId: *mut u32) -> u32;
+                    fn GetCurrentProcessId() -> u32;
+                }
+                let fg = GetForegroundWindow();
+                let mut pid = 0u32;
+                GetWindowThreadProcessId(fg, &mut pid);
+                pid == GetCurrentProcessId()
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                win.is_focused().unwrap_or(false)
+            }
+        };
+
+        if is_currently_visible && (is_active_foreground || is_visible.load(Ordering::SeqCst)) {
             let _ = win.hide();
             is_visible.store(false, Ordering::SeqCst);
         } else {
             mark_shown();
+            #[cfg(target_os = "windows")]
+            position_window_bottom_center();
+            #[cfg(not(target_os = "windows"))]
+            if let Some(monitor) = win.primary_monitor().ok().flatten() {
+                let size = monitor.size();
+                let x = (size.width as i32 - 800) / 2;
+                let y = size.height as i32 - 560 - 60;
+                let _ = win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
+            }
             let _ = win.show();
             #[cfg(target_os = "windows")]
             force_foreground();
@@ -636,6 +706,7 @@ fn main() {
 
             #[cfg(target_os = "windows")]
             {
+                position_window_bottom_center();
                 let settings = StorageManager::load_settings();
                 let initial_hotkey = settings.get("hotkey").and_then(|v| v.as_str()).unwrap_or("Right Alt");
                 global_hotkey::start(app_handle.clone(), Arc::clone(&state_for_setup.is_visible), initial_hotkey);

@@ -84,8 +84,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v2.0.3' }}
-          name: Finder ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v2.0.3' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v2.0.4' }}
+          name: Finder ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'v2.0.4' }}
           draft: false
           prerelease: false
           make_latest: true

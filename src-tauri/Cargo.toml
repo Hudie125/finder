@@ -1,6 +1,6 @@
 [package]
 name = "finder"
-version = "2.0.3"
+version = "2.0.4"
 description = "Monochrome Liquid Glass Spotlight Launcher for Windows and Arch Linux"
 authors = ["Dima"]
 edition = "2021"
