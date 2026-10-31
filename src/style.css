@@ -4,14 +4,14 @@
    ========================================================================== */
 
 :root {
-  --bg-liquid-glass: rgba(18, 20, 26, 0.94);
+  --bg-liquid-glass: #111318;
   --bg-card: rgba(255, 255, 255, 0.055);
   --bg-card-hover: rgba(255, 255, 255, 0.10);
   --bg-card-active: rgba(255, 255, 255, 0.16);
   --border-glass: rgba(255, 255, 255, 0.11);
-  --border-glass-bright: rgba(255, 255, 255, 0.24);
-  --inner-highlight: inset 0 1px 1px 0 rgba(255, 255, 255, 0.20), inset 0 0 0 1px rgba(255, 255, 255, 0.07);
-  --shadow-liquid: 0 24px 64px rgba(0, 0, 0, 0.8), 0 4px 16px rgba(0, 0, 0, 0.5);
+  --border-glass-bright: rgba(255, 255, 255, 0.22);
+  --inner-highlight: inset 0 1px 1px 0 rgba(255, 255, 255, 0.18), inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-liquid: 0 28px 75px rgba(0, 0, 0, 0.95), 0 8px 24px rgba(0, 0, 0, 0.7);
   --shadow-glow: 0 0 40px rgba(255, 255, 255, 0.06);
 
   --text-primary: rgba(255, 255, 255, 0.96);
@@ -92,7 +92,7 @@ body {
   height: 100vh;
   width: 100vw;
   margin: 0;
-  padding: 10px;
+  padding: 12px;
   display: flex;
   justify-content: center;
   align-items: center;
@@ -104,12 +104,10 @@ body {
 .finder-container {
   width: 100%;
   height: 100%;
-  background: var(--bg-liquid-glass);
-  backdrop-filter: blur(40px) saturate(180%);
-  -webkit-backdrop-filter: blur(40px) saturate(180%);
-  border-radius: 20px;
-  border: 1px solid var(--border-glass-bright);
-  box-shadow: var(--shadow-liquid), var(--inner-highlight);
+  background: #111318;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 28px 75px rgba(0, 0, 0, 0.95), 0 8px 24px rgba(0, 0, 0, 0.7), inset 0 1px 1px rgba(255, 255, 255, 0.18);
   position: relative;
   overflow: hidden;
   display: flex;
@@ -633,9 +631,9 @@ body {
   padding: 20px 24px;
   margin: 12px 10px;
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid var(--border-glass-bright);
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.5), var(--inner-highlight);
+  background: #181b23;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), inset 0 1px 1px rgba(255, 255, 255, 0.15);
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1066,14 +1064,14 @@ kbd {
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(10, 11, 15, 0.90);
+  background: rgba(8, 9, 13, 0.88);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 100;
-  border-radius: 20px;
+  border-radius: 22px;
   animation: fadeIn 0.25s var(--ease-apple);
 }
 
@@ -1086,10 +1084,10 @@ kbd {
   width: 90%;
   max-width: 520px;
   max-height: 88%;
-  background: rgba(24, 26, 32, 0.98);
-  border: 1px solid var(--border-glass-bright);
+  background: #161820;
+  border: 1px solid rgba(255, 255, 255, 0.20);
   border-radius: 18px;
-  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.9), var(--inner-highlight);
+  box-shadow: 0 28px 70px rgba(0, 0, 0, 0.95), var(--inner-highlight);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1135,6 +1133,63 @@ kbd {
   gap: 14px;
   overflow-y: auto;
   flex: 1;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
+.modal-body::-webkit-scrollbar {
+  width: 6px;
+}
+
+.modal-body::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.modal-body::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 6px;
+}
+
+.hotkey-input-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.hotkey-input-row input {
+  flex: 1;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  text-align: center;
+}
+
+.record-btn {
+  padding: 8px 14px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.10);
+  border: 1px solid var(--border-glass-bright);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.25s var(--ease-apple);
+  white-space: nowrap;
+}
+
+.record-btn:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.record-btn.recording {
+  background: rgba(255, 77, 79, 0.25);
+  border-color: #ff4d4f;
+  color: #ff7875;
+  animation: pulseRecording 1s infinite alternate;
+}
+
+@keyframes pulseRecording {
+  from { opacity: 0.8; }
+  to { opacity: 1; border-color: #ff7875; box-shadow: 0 0 10px rgba(255, 77, 79, 0.5); }
 }
 
 .setting-group {

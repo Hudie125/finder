@@ -245,6 +245,7 @@ function setupEventListeners() {
   });
   saveSettingsBtn.addEventListener('click', saveSettingsFromModal);
   resetSettingsBtn.addEventListener('click', resetSettingsToDefault);
+  setupHotkeyRecorder();
 
   // Tauri Backend Events
   if (window.__TAURI__ && window.__TAURI__.event) {
@@ -633,6 +634,69 @@ function openSettings() {
   document.getElementById('settingLaunchOnStartup').checked = state.config.launchOnStartup;
 
   settingsModal.style.display = 'flex';
+}
+
+let isRecordingHotkey = false;
+
+function setupHotkeyRecorder() {
+  const recordBtn = document.getElementById('recordHotkeyBtn');
+  const hotkeyInput = document.getElementById('settingHotkey');
+  if (!recordBtn || !hotkeyInput) return;
+
+  recordBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    isRecordingHotkey = true;
+    recordBtn.textContent = 'Press keys...';
+    recordBtn.classList.add('recording');
+    hotkeyInput.value = 'Listening...';
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (!isRecordingHotkey) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.code === 'AltRight') {
+      hotkeyInput.value = 'Right Alt';
+      stopRecording();
+      return;
+    }
+    if (e.code === 'AltLeft') {
+      hotkeyInput.value = 'Left Alt';
+      stopRecording();
+      return;
+    }
+    if (e.key === 'Escape') {
+      hotkeyInput.value = state.config.hotkey || 'Right Alt';
+      stopRecording();
+      return;
+    }
+
+    if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) {
+      return;
+    }
+
+    let parts = [];
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+    if (e.metaKey) parts.push('Super');
+
+    let keyName = e.code.replace('Key', '').replace('Digit', '');
+    if (e.code === 'Space') keyName = 'Space';
+    else if (e.code === 'Backquote') keyName = '~';
+    else if (e.code.startsWith('F') && !isNaN(e.code.slice(1))) keyName = e.code;
+
+    parts.push(keyName);
+    hotkeyInput.value = parts.join('+');
+    stopRecording();
+  }, true);
+
+  function stopRecording() {
+    isRecordingHotkey = false;
+    recordBtn.textContent = 'Record Shortcut';
+    recordBtn.classList.remove('recording');
+  }
 }
 
 function saveSettingsFromModal() {

@@ -255,6 +255,10 @@ fn get_settings() -> serde_json::Value {
 #[tauri::command]
 fn save_settings(settings: serde_json::Value) {
     StorageManager::save_settings(&settings);
+    #[cfg(target_os = "windows")]
+    if let Some(hotkey) = settings.get("hotkey").and_then(|v| v.as_str()) {
+        global_hotkey::set_hotkey(hotkey);
+    }
 }
 
 #[tauri::command]
@@ -265,14 +269,85 @@ fn hide_window(app: AppHandle, state: tauri::State<'_, Arc<AppState>>) {
     }
 }
 
+static LAST_SHOWN: std::sync::OnceLock<std::sync::Mutex<std::time::Instant>> = std::sync::OnceLock::new();
+
+pub fn mark_shown() {
+    let m = LAST_SHOWN.get_or_init(|| std::sync::Mutex::new(std::time::Instant::now()));
+    if let Ok(mut lock) = m.lock() {
+        *lock = std::time::Instant::now();
+    }
+}
+
+pub fn should_ignore_blur() -> bool {
+    let m = LAST_SHOWN.get_or_init(|| std::sync::Mutex::new(std::time::Instant::now()));
+    if let Ok(lock) = m.lock() {
+        lock.elapsed() < std::time::Duration::from_millis(350)
+    } else {
+        false
+    }
+}
+
+#[cfg(target_os = "windows")]
+pub fn force_foreground() {
+    unsafe {
+        extern "system" {
+            fn FindWindowW(lpClassName: *const u16, lpWindowName: *const u16) -> isize;
+            fn GetForegroundWindow() -> isize;
+            fn GetWindowThreadProcessId(hwnd: isize, lpdwProcessId: *mut u32) -> u32;
+            fn GetCurrentThreadId() -> u32;
+            fn AttachThreadInput(idAttach: u32, idAttachTo: u32, fAttach: i32) -> i32;
+            fn SetForegroundWindow(hwnd: isize) -> i32;
+            fn SetFocus(hwnd: isize) -> isize;
+            fn BringWindowToTop(hwnd: isize) -> i32;
+            fn ShowWindow(hwnd: isize, nCmdShow: i32) -> i32;
+            fn SetWindowPos(hwnd: isize, hWndInsertAfter: isize, X: i32, Y: i32, cx: i32, cy: i32, uFlags: u32) -> i32;
+        }
+
+        let title: Vec<u16> = "Finder\0".encode_utf16().collect();
+        let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+        if hwnd == 0 {
+            return;
+        }
+
+        const SW_RESTORE: i32 = 9;
+        const HWND_TOPMOST: isize = -1;
+        const SWP_NOMOVE: u32 = 0x0002;
+        const SWP_NOSIZE: u32 = 0x0001;
+        const SWP_SHOWWINDOW: u32 = 0x0040;
+
+        let fg_hwnd = GetForegroundWindow();
+        let fg_thread = GetWindowThreadProcessId(fg_hwnd, std::ptr::null_mut());
+        let cur_thread = GetCurrentThreadId();
+
+        if fg_thread != 0 && fg_thread != cur_thread {
+            AttachThreadInput(cur_thread, fg_thread, 1);
+        }
+
+        ShowWindow(hwnd, SW_RESTORE);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        BringWindowToTop(hwnd);
+        SetForegroundWindow(hwnd);
+        SetFocus(hwnd);
+
+        if fg_thread != 0 && fg_thread != cur_thread {
+            AttachThreadInput(cur_thread, fg_thread, 0);
+        }
+    }
+}
+
 pub fn toggle_window_visibility(app: &AppHandle, is_visible: &AtomicBool) {
     if let Some(win) = app.get_webview_window("main") {
         let is_currently_visible = win.is_visible().unwrap_or(false);
-        if is_currently_visible {
+        let is_focused = win.is_focused().unwrap_or(false);
+
+        if is_currently_visible && is_focused {
             let _ = win.hide();
             is_visible.store(false, Ordering::SeqCst);
         } else {
+            mark_shown();
             let _ = win.show();
+            #[cfg(target_os = "windows")]
+            force_foreground();
             let _ = win.set_focus();
             is_visible.store(true, Ordering::SeqCst);
             let _ = win.emit("focus-search", ());
@@ -293,17 +368,7 @@ mod single_instance {
         unsafe {
             let handle = CreateMutexW(std::ptr::null_mut(), 1, name.as_ptr());
             if handle == 0 || GetLastError() == ERROR_ALREADY_EXISTS {
-                extern "system" {
-                    fn FindWindowW(lpClassName: *const u16, lpWindowName: *const u16) -> isize;
-                    fn ShowWindow(hwnd: isize, nCmdShow: i32) -> i32;
-                    fn SetForegroundWindow(hwnd: isize) -> i32;
-                }
-                let title: Vec<u16> = "Finder\0".encode_utf16().collect();
-                let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
-                if hwnd != 0 {
-                    ShowWindow(hwnd, 9); // SW_RESTORE
-                    SetForegroundWindow(hwnd);
-                }
+                crate::force_foreground();
                 return false;
             }
         }
@@ -314,17 +379,131 @@ mod single_instance {
 #[cfg(target_os = "windows")]
 mod global_hotkey {
     use std::sync::atomic::AtomicBool;
-    use std::sync::{Arc, OnceLock};
+    use std::sync::{Arc, OnceLock, RwLock};
     use tauri::AppHandle;
 
     static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
     static IS_VISIBLE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+    static CURRENT_HOTKEY: OnceLock<RwLock<HotkeyConfig>> = OnceLock::new();
     static mut HOOK: isize = 0;
 
-    const VK_RMENU: u32 = 0xA5; // Right Alt
     const WH_KEYBOARD_LL: i32 = 13;
+    const WM_KEYDOWN: u32 = 0x0100;
     const WM_KEYUP: u32 = 0x0101;
+    const WM_SYSKEYDOWN: u32 = 0x0104;
     const WM_SYSKEYUP: u32 = 0x0105;
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct HotkeyConfig {
+        pub ctrl: bool,
+        pub alt: bool,
+        pub shift: bool,
+        pub win: bool,
+        pub vk: u32,
+        pub is_single_modifier: bool,
+    }
+
+    impl HotkeyConfig {
+        pub fn parse(s: &str) -> Self {
+            let clean = s.trim();
+            let lower = clean.to_lowercase().replace(' ', "");
+
+            if lower == "rightalt" || lower == "ralt" || lower == "altright" {
+                return Self {
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                    win: false,
+                    vk: 0xA5, // VK_RMENU
+                    is_single_modifier: true,
+                };
+            }
+            if lower == "leftalt" || lower == "lalt" || lower == "altleft" {
+                return Self {
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                    win: false,
+                    vk: 0xA4, // VK_LMENU
+                    is_single_modifier: true,
+                };
+            }
+            if lower == "alt" {
+                return Self {
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                    win: false,
+                    vk: 0xA5,
+                    is_single_modifier: true,
+                };
+            }
+
+            let parts: Vec<&str> = clean.split('+').map(|p| p.trim()).collect();
+            let mut ctrl = false;
+            let mut alt = false;
+            let mut shift = false;
+            let mut win = false;
+            let mut vk = 0xA5;
+            let mut has_key = false;
+
+            for part in &parts {
+                let p_lower = part.to_lowercase();
+                match p_lower.as_str() {
+                    "ctrl" | "control" => ctrl = true,
+                    "alt" | "option" => alt = true,
+                    "shift" => shift = true,
+                    "super" | "win" | "cmd" | "meta" => win = true,
+                    "space" => { vk = 0x20; has_key = true; },
+                    "tab" => { vk = 0x09; has_key = true; },
+                    "enter" | "return" => { vk = 0x0D; has_key = true; },
+                    "esc" | "escape" => { vk = 0x1B; has_key = true; },
+                    "tilde" | "`" | "~" => { vk = 0xC0; has_key = true; },
+                    "f1" => { vk = 0x70; has_key = true; },
+                    "f2" => { vk = 0x71; has_key = true; },
+                    "f3" => { vk = 0x72; has_key = true; },
+                    "f4" => { vk = 0x73; has_key = true; },
+                    "f5" => { vk = 0x74; has_key = true; },
+                    "f6" => { vk = 0x75; has_key = true; },
+                    "f7" => { vk = 0x76; has_key = true; },
+                    "f8" => { vk = 0x77; has_key = true; },
+                    "f9" => { vk = 0x78; has_key = true; },
+                    "f10" => { vk = 0x79; has_key = true; },
+                    "f11" => { vk = 0x7A; has_key = true; },
+                    "f12" => { vk = 0x7B; has_key = true; },
+                    other => {
+                        if other.len() == 1 {
+                            let c = other.chars().next().unwrap().to_ascii_uppercase();
+                            if c.is_ascii_alphanumeric() {
+                                vk = c as u32;
+                                has_key = true;
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !has_key && (ctrl || alt || shift || win) {
+                return Self {
+                    ctrl: false,
+                    alt: false,
+                    shift: false,
+                    win: false,
+                    vk: 0xA5,
+                    is_single_modifier: true,
+                };
+            }
+
+            Self {
+                ctrl,
+                alt,
+                shift,
+                win,
+                vk,
+                is_single_modifier: false,
+            }
+        }
+    }
 
     #[repr(C)]
     struct KBDLLHOOKSTRUCT {
@@ -344,23 +523,58 @@ mod global_hotkey {
         ) -> isize;
         fn CallNextHookEx(hhk: isize, n_code: i32, w_param: usize, l_param: usize) -> isize;
         fn GetMessageW(msg: *mut u8, hwnd: isize, filter_min: u32, filter_max: u32) -> i32;
+        fn GetAsyncKeyState(vKey: i32) -> i16;
     }
 
     unsafe extern "system" fn hook_proc(n_code: i32, w_param: usize, l_param: usize) -> isize {
-        if n_code >= 0 && (w_param as u32 == WM_KEYUP || w_param as u32 == WM_SYSKEYUP) {
+        if n_code >= 0 {
+            let msg = w_param as u32;
             let info = &*(l_param as *const KBDLLHOOKSTRUCT);
-            if info.vk_code == VK_RMENU {
-                if let (Some(app), Some(vis)) = (APP_HANDLE.get(), IS_VISIBLE.get()) {
-                    crate::toggle_window_visibility(app, vis);
+
+            if let Some(rw) = CURRENT_HOTKEY.get() {
+                if let Ok(config) = rw.read() {
+                    if config.is_single_modifier {
+                        if (msg == WM_KEYUP || msg == WM_SYSKEYUP) && info.vk_code == config.vk {
+                            if let (Some(app), Some(vis)) = (APP_HANDLE.get(), IS_VISIBLE.get()) {
+                                crate::toggle_window_visibility(app, vis);
+                            }
+                        }
+                    } else {
+                        if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && info.vk_code == config.vk {
+                            let ctrl_down = (GetAsyncKeyState(0x11) as u16 & 0x8000) != 0;
+                            let alt_down = (GetAsyncKeyState(0x12) as u16 & 0x8000) != 0;
+                            let shift_down = (GetAsyncKeyState(0x10) as u16 & 0x8000) != 0;
+                            let win_down = ((GetAsyncKeyState(0x5B) as u16 & 0x8000) != 0) || ((GetAsyncKeyState(0x5C) as u16 & 0x8000) != 0);
+
+                            if ctrl_down == config.ctrl && alt_down == config.alt && shift_down == config.shift && win_down == config.win {
+                                if let (Some(app), Some(vis)) = (APP_HANDLE.get(), IS_VISIBLE.get()) {
+                                    crate::toggle_window_visibility(app, vis);
+                                }
+                                return 1; // Consume key event
+                            }
+                        }
+                    }
                 }
             }
         }
         CallNextHookEx(HOOK, n_code, w_param, l_param)
     }
 
-    pub fn start(app: AppHandle, is_visible: Arc<AtomicBool>) {
+    pub fn set_hotkey(hotkey_str: &str) {
+        let config = HotkeyConfig::parse(hotkey_str);
+        if let Some(rw) = CURRENT_HOTKEY.get() {
+            if let Ok(mut lock) = rw.write() {
+                *lock = config;
+            }
+        } else {
+            let _ = CURRENT_HOTKEY.set(RwLock::new(config));
+        }
+    }
+
+    pub fn start(app: AppHandle, is_visible: Arc<AtomicBool>, initial_hotkey: &str) {
         let _ = APP_HANDLE.set(app);
         let _ = IS_VISIBLE.set(is_visible);
+        set_hotkey(initial_hotkey);
 
         std::thread::spawn(move || unsafe {
             HOOK = SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, 0, 0);
@@ -397,8 +611,10 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .on_window_event(move |window, event| {
             if let tauri::WindowEvent::Focused(false) = event {
-                let _ = window.hide();
-                state_for_blur.is_visible.store(false, Ordering::SeqCst);
+                if !should_ignore_blur() {
+                    let _ = window.hide();
+                    state_for_blur.is_visible.store(false, Ordering::SeqCst);
+                }
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -419,7 +635,11 @@ fn main() {
             let app_handle = app.handle().clone();
 
             #[cfg(target_os = "windows")]
-            global_hotkey::start(app_handle.clone(), Arc::clone(&state_for_setup.is_visible));
+            {
+                let settings = StorageManager::load_settings();
+                let initial_hotkey = settings.get("hotkey").and_then(|v| v.as_str()).unwrap_or("Right Alt");
+                global_hotkey::start(app_handle.clone(), Arc::clone(&state_for_setup.is_visible), initial_hotkey);
+            }
 
             // Setup Tray Menu
             if let Ok(toggle_item) = MenuItem::with_id(&app_handle, "toggle", "Toggle Finder", true, None::<&str>) {

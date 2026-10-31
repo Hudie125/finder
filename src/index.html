@@ -218,7 +218,7 @@
       </div>
       <div class="footer-meta">
         <span class="app-brand">Finder</span>
-        <span class="app-version">v2.0 Liquid</span>
+        <span class="app-version">v2.0.3 Monocrome</span>
       </div>
     </footer>
 
@@ -232,8 +232,11 @@
         <div class="modal-body">
           <div class="setting-group">
             <label class="setting-label">Global Summon Hotkey</label>
-            <input type="text" id="settingHotkey" value="Right Alt" />
-            <small class="setting-hint">e.g. Right Alt, Alt+Space, Super+Space, Ctrl+Space</small>
+            <div class="hotkey-input-row">
+              <input type="text" id="settingHotkey" value="Right Alt" readonly />
+              <button type="button" class="record-btn" id="recordHotkeyBtn">Record Shortcut</button>
+            </div>
+            <small class="setting-hint">Click "Record Shortcut" and press desired keys (e.g. Right Alt, Alt+Space, Ctrl+Space, F1)</small>
           </div>
 
           <div class="setting-group">
