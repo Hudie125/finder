@@ -40,7 +40,7 @@ pub struct UnifiedSearchResult {
 struct AppState {
     monitor: HardwareMonitor,
     cached_apps: Vec<AppEntry>,
-    is_visible: AtomicBool,
+    is_visible: Arc<AtomicBool>,
 }
 
 // ==========================================================================
@@ -313,7 +313,7 @@ mod single_instance {
 
 #[cfg(target_os = "windows")]
 mod global_hotkey {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
     use std::sync::{Arc, OnceLock};
     use tauri::AppHandle;
 
@@ -381,10 +381,11 @@ fn main() {
     }
 
     let cached_apps = AppScanner::get_installed_apps();
+    let is_visible = Arc::new(AtomicBool::new(true));
     let app_state = Arc::new(AppState {
         monitor: HardwareMonitor::new(),
         cached_apps,
-        is_visible: AtomicBool::new(true),
+        is_visible: Arc::clone(&is_visible),
     });
 
     let state_for_tray = Arc::clone(&app_state);
