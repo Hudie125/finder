@@ -18,14 +18,20 @@ pub struct SystemTelemetry {
 
 pub struct HardwareMonitor {
     sys: Mutex<System>,
+    gpu_name: String,
+    os_name: String,
 }
 
 impl HardwareMonitor {
     pub fn new() -> Self {
         let mut sys = System::new_all();
         sys.refresh_all();
+        let gpu_name = Self::detect_gpu_name();
+        let os_name = System::long_os_version().unwrap_or_else(|| "Windows / Linux".to_string());
         Self {
             sys: Mutex::new(sys),
+            gpu_name,
+            os_name,
         }
     }
 
@@ -56,9 +62,6 @@ impl HardwareMonitor {
         let mins = (uptime_secs % 3600) / 60;
         let uptime = format!("{}h {}m", hours, mins);
 
-        let os_name = System::long_os_version().unwrap_or_else(|| "Windows / Linux".to_string());
-        let gpu_name = Self::detect_gpu_name();
-
         SystemTelemetry {
             cpu_name,
             cpu_usage,
@@ -66,9 +69,9 @@ impl HardwareMonitor {
             ram_used_gb,
             ram_total_gb,
             ram_usage_percent,
-            gpu_name,
+            gpu_name: self.gpu_name.clone(),
             gpu_usage_percent: 15.0, // baseline estimate
-            os_name,
+            os_name: self.os_name.clone(),
             uptime,
         }
     }
@@ -76,12 +79,14 @@ impl HardwareMonitor {
     fn detect_gpu_name() -> String {
         #[cfg(target_os = "windows")]
         {
-            // Try reading Display adapter from registry or wmic fallback
-            let output = std::process::Command::new("powershell")
-                .args(["-NoProfile", "-Command", "(Get-CimInstance Win32_VideoController | Select-Object -First 1).Name"])
-                .output();
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
 
-            if let Ok(out) = output {
+            let mut cmd = std::process::Command::new("powershell");
+            cmd.args(["-NoProfile", "-NonInteractive", "-Command", "(Get-CimInstance Win32_VideoController | Select-Object -First 1).Name"]);
+            cmd.creation_flags(CREATE_NO_WINDOW);
+
+            if let Ok(out) = cmd.output() {
                 let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
                 if !name.is_empty() {
                     return name;

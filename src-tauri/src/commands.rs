@@ -1,6 +1,11 @@
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_os = "windows")]
+use std::os::windows::process::CommandExt;
+#[cfg(target_os = "windows")]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandItem {
     pub title: String,
@@ -76,7 +81,10 @@ impl CommandRunner {
             "reboot" => {
                 #[cfg(target_os = "windows")]
                 {
-                    let _ = std::process::Command::new("shutdown").args(["/r", "/t", "10"]).spawn();
+                    let mut cmd = std::process::Command::new("shutdown");
+                    cmd.args(["/r", "/t", "10"]);
+                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    let _ = cmd.spawn();
                 }
                 #[cfg(target_os = "linux")]
                 {
@@ -87,7 +95,10 @@ impl CommandRunner {
             "shutdown" => {
                 #[cfg(target_os = "windows")]
                 {
-                    let _ = std::process::Command::new("shutdown").args(["/s", "/t", "10"]).spawn();
+                    let mut cmd = std::process::Command::new("shutdown");
+                    cmd.args(["/s", "/t", "10"]);
+                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    let _ = cmd.spawn();
                 }
                 #[cfg(target_os = "linux")]
                 {
@@ -98,7 +109,10 @@ impl CommandRunner {
             "cancel" => {
                 #[cfg(target_os = "windows")]
                 {
-                    let _ = std::process::Command::new("shutdown").arg("/a").spawn();
+                    let mut cmd = std::process::Command::new("shutdown");
+                    cmd.arg("/a");
+                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    let _ = cmd.spawn();
                 }
                 #[cfg(target_os = "linux")]
                 {
@@ -109,9 +123,10 @@ impl CommandRunner {
             "emptybin" => {
                 #[cfg(target_os = "windows")]
                 {
-                    let _ = std::process::Command::new("powershell")
-                        .args(["-NoProfile", "-Command", "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"])
-                        .spawn();
+                    let mut cmd = std::process::Command::new("powershell");
+                    cmd.args(["-NoProfile", "-NonInteractive", "-Command", "Clear-RecycleBin -Force -ErrorAction SilentlyContinue"]);
+                    cmd.creation_flags(CREATE_NO_WINDOW);
+                    let _ = cmd.spawn();
                 }
                 #[cfg(target_os = "linux")]
                 {
@@ -196,9 +211,10 @@ impl CommandRunner {
                     #[cfg(target_os = "windows")]
                     {
                         let msg = format!("Timer Finished: {}", dur_owned);
-                        let _ = std::process::Command::new("powershell")
-                            .args(["-NoProfile", "-Command", &format!("[System.Windows.Forms.MessageBox]::Show('{}', 'Finder Timer')", msg)])
-                            .spawn();
+                        let mut cmd = std::process::Command::new("powershell");
+                        cmd.args(["-NoProfile", "-NonInteractive", "-Command", &format!("[System.Windows.Forms.MessageBox]::Show('{}', 'Finder Timer')", msg)]);
+                        cmd.creation_flags(CREATE_NO_WINDOW);
+                        let _ = cmd.spawn();
                     }
                     #[cfg(target_os = "linux")]
                     {

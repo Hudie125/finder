@@ -258,24 +258,116 @@ fn save_settings(settings: serde_json::Value) {
 }
 
 #[tauri::command]
-fn hide_window(app: AppHandle) {
+fn hide_window(app: AppHandle, state: tauri::State<'_, Arc<AppState>>) {
     if let Some(win) = app.get_webview_window("main") {
         let _ = win.hide();
+        state.is_visible.store(false, Ordering::SeqCst);
     }
 }
 
-fn toggle_window_visibility(app: &AppHandle, is_visible: &AtomicBool) {
+pub fn toggle_window_visibility(app: &AppHandle, is_visible: &AtomicBool) {
     if let Some(win) = app.get_webview_window("main") {
-        let visible = is_visible.load(Ordering::SeqCst);
-        if visible {
+        let is_currently_visible = win.is_visible().unwrap_or(false);
+        if is_currently_visible {
             let _ = win.hide();
             is_visible.store(false, Ordering::SeqCst);
         } else {
             let _ = win.show();
+            let _ = win.unminimize();
             let _ = win.set_focus();
             is_visible.store(true, Ordering::SeqCst);
             let _ = win.emit("focus-search", ());
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod single_instance {
+    extern "system" {
+        fn CreateMutexW(lpMutexAttributes: *mut u8, bInitialOwner: i32, lpName: *const u16) -> isize;
+        fn GetLastError() -> u32;
+    }
+    const ERROR_ALREADY_EXISTS: u32 = 183;
+
+    pub fn ensure_single_instance() -> bool {
+        let name: Vec<u16> = "Global\\FinderAppSpotlightSingleton\0".encode_utf16().collect();
+        unsafe {
+            let handle = CreateMutexW(std::ptr::null_mut(), 1, name.as_ptr());
+            if handle == 0 || GetLastError() == ERROR_ALREADY_EXISTS {
+                extern "system" {
+                    fn FindWindowW(lpClassName: *const u16, lpWindowName: *const u16) -> isize;
+                    fn ShowWindow(hwnd: isize, nCmdShow: i32) -> i32;
+                    fn SetForegroundWindow(hwnd: isize) -> i32;
+                }
+                let title: Vec<u16> = "Finder\0".encode_utf16().collect();
+                let hwnd = FindWindowW(std::ptr::null(), title.as_ptr());
+                if hwnd != 0 {
+                    ShowWindow(hwnd, 9); // SW_RESTORE
+                    SetForegroundWindow(hwnd);
+                }
+                return false;
+            }
+        }
+        true
+    }
+}
+
+#[cfg(target_os = "windows")]
+mod global_hotkey {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, OnceLock};
+    use tauri::AppHandle;
+
+    static APP_HANDLE: OnceLock<AppHandle> = OnceLock::new();
+    static IS_VISIBLE: OnceLock<Arc<AtomicBool>> = OnceLock::new();
+    static mut HOOK: isize = 0;
+
+    const VK_RMENU: u32 = 0xA5; // Right Alt
+    const WH_KEYBOARD_LL: i32 = 13;
+    const WM_KEYUP: u32 = 0x0101;
+    const WM_SYSKEYUP: u32 = 0x0105;
+
+    #[repr(C)]
+    struct KBDLLHOOKSTRUCT {
+        vk_code: u32,
+        scan_code: u32,
+        flags: u32,
+        time: u32,
+        extra_info: usize,
+    }
+
+    extern "system" {
+        fn SetWindowsHookExW(
+            id_hook: i32,
+            lpfn: unsafe extern "system" fn(i32, usize, usize) -> isize,
+            hmod: isize,
+            thread_id: u32,
+        ) -> isize;
+        fn CallNextHookEx(hhk: isize, n_code: i32, w_param: usize, l_param: usize) -> isize;
+        fn GetMessageW(msg: *mut u8, hwnd: isize, filter_min: u32, filter_max: u32) -> i32;
+    }
+
+    unsafe extern "system" fn hook_proc(n_code: i32, w_param: usize, l_param: usize) -> isize {
+        if n_code >= 0 && (w_param as u32 == WM_KEYUP || w_param as u32 == WM_SYSKEYUP) {
+            let info = &*(l_param as *const KBDLLHOOKSTRUCT);
+            if info.vk_code == VK_RMENU {
+                if let (Some(app), Some(vis)) = (APP_HANDLE.get(), IS_VISIBLE.get()) {
+                    crate::toggle_window_visibility(app, vis);
+                }
+            }
+        }
+        CallNextHookEx(HOOK, n_code, w_param, l_param)
+    }
+
+    pub fn start(app: AppHandle, is_visible: Arc<AtomicBool>) {
+        let _ = APP_HANDLE.set(app);
+        let _ = IS_VISIBLE.set(is_visible);
+
+        std::thread::spawn(move || unsafe {
+            HOOK = SetWindowsHookExW(WH_KEYBOARD_LL, hook_proc, 0, 0);
+            let mut msg = [0u8; 48];
+            while GetMessageW(msg.as_mut_ptr(), 0, 0, 0) > 0 {}
+        });
     }
 }
 
@@ -284,6 +376,11 @@ fn toggle_window_visibility(app: &AppHandle, is_visible: &AtomicBool) {
 // ==========================================================================
 
 fn main() {
+    #[cfg(target_os = "windows")]
+    if !single_instance::ensure_single_instance() {
+        std::process::exit(0);
+    }
+
     let cached_apps = AppScanner::get_installed_apps();
     let app_state = Arc::new(AppState {
         monitor: HardwareMonitor::new(),
@@ -292,6 +389,7 @@ fn main() {
     });
 
     let state_for_tray = Arc::clone(&app_state);
+    let state_for_setup = Arc::clone(&app_state);
 
     tauri::Builder::default()
         .manage(Arc::clone(&app_state))
@@ -312,6 +410,23 @@ fn main() {
         ])
         .setup(move |app| {
             let app_handle = app.handle().clone();
+
+            #[cfg(target_os = "windows")]
+            global_hotkey::start(app_handle.clone(), Arc::clone(&state_for_setup.is_visible));
+
+            // Hide window when it loses focus (clicking outside)
+            if let Some(win) = app.get_webview_window("main") {
+                let win_clone = win.clone();
+                let is_vis_blur = Arc::clone(&state_for_setup.is_visible);
+                win.on_window_event(move |event| {
+                    if let tauri::WindowEvent::Focused(focused) = event {
+                        if !focused {
+                            let _ = win_clone.hide();
+                            is_vis_blur.store(false, Ordering::SeqCst);
+                        }
+                    }
+                });
+            }
 
             // Setup Tray Menu
             if let Ok(toggle_item) = MenuItem::with_id(&app_handle, "toggle", "Toggle Finder", true, None::<&str>) {

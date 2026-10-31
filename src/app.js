@@ -240,8 +240,24 @@ function setupEventListeners() {
   // Settings Modal Handlers
   settingsBtn.addEventListener('click', openSettings);
   closeSettingsBtn.addEventListener('click', () => settingsModal.style.display = 'none');
+  settingsModal.addEventListener('click', (e) => {
+    if (e.target === settingsModal) settingsModal.style.display = 'none';
+  });
   saveSettingsBtn.addEventListener('click', saveSettingsFromModal);
   resetSettingsBtn.addEventListener('click', resetSettingsToDefault);
+
+  // Tauri Backend Events
+  if (window.__TAURI__ && window.__TAURI__.event) {
+    try {
+      window.__TAURI__.event.listen('focus-search', () => {
+        searchInput.focus();
+        searchInput.select();
+      });
+      window.__TAURI__.event.listen('open-settings', () => {
+        openSettings();
+      });
+    } catch (_) {}
+  }
 }
 
 // ==========================================================================
@@ -278,6 +294,14 @@ async function performSearch(query) {
   // Instant Check: Special Math Calculator
   const mathResult = tryEvaluateMath(trimmed);
   if (mathResult !== null) {
+    state.results = [{
+      title: `${trimmed} = ${mathResult}`,
+      description: 'Calculator result - Press Enter to copy to clipboard',
+      action: () => copyToClipboard(mathResult.toString()),
+      category: 'Math',
+      icon: '🧮'
+    }];
+    state.selectedIndex = 0;
     renderCalcCard(trimmed, mathResult);
     return;
   }
